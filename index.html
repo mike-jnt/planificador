@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mi Semana — Login + Planner</title>
+  <meta name="description" content="Acceso con login local (HTML) y planner semanal con 12h, notas, etiquetas, progreso por día. Sync opcional con Firestore." />
+  <style>
+    :root{ --bg:#0f172a; --panel:#111827; --card:#0b1226; --muted:#94a3b8; --text:#e5e7eb; --acc:#8b5cf6; --acc2:#22c55e; --danger:#ef4444; --shadow: 0 10px 25px rgba(0,0,0,.35); --radius: 16px; }
+    *{ box-sizing:border-box }
+    html,body{ height:100% }
+    body{ margin:0; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background: radial-gradient(1200px 600px at 20% -10%, #1f2937, transparent), radial-gradient(1000px 500px at 110% 10%, #0b1020, transparent), var(--bg); color: var(--text); }
+    /* Topbar / App hidden until login */
+    .topbar{ position:sticky; top:0; z-index:50; backdrop-filter: blur(10px); background: rgba(15,23,42,.6); border-bottom: 1px solid rgba(148,163,184,.12); display:none; }
+    .topbar.show{ display:block; }
+    .topbar-inner{ max-width:1200px; margin:0 auto; padding:14px 18px; display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+    h1{ margin:0; font-size: clamp(20px, 3vw, 28px); letter-spacing:.3px }
+    .controls{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+    .search{ position:relative; min-width:220px; flex:1 1 280px; }
+    .search input{ width:100%; padding:10px 36px; border-radius:999px; background:#0b1226; border:1px solid rgba(148,163,184,.15); color:var(--text); outline:none; transition:border .2s ease; }
+    .search input:focus{ border-color: rgba(139,92,246,.6) }
+    .btn{ border:none; padding:8px 12px; border-radius:10px; background:rgba(148,163,184,.12); color:var(--text); cursor:pointer; transition: transform .12s ease, background .2s ease, opacity .2s ease }
+    .btn:hover{ transform: translateY(-1px) }
+    .btn-primary{ background: linear-gradient(90deg, var(--acc), #06b6d4); color:white }
+    .btn-danger{ background: rgba(239,68,68,.14); color:#fecaca; border:1px solid rgba(239,68,68,.25) }
+    .pill{ padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.03); border:1px solid rgba(148,163,184,.06) }
+    main{ max-width:1200px; margin:16px auto 80px; padding:0 18px; display:none; }
+    main.show{ display:block; }
+    .grid{ display:grid; gap:16px; grid-template-columns: repeat(7, 1fr); }
+    @media (max-width:1100px){ .grid{ grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width:800px){ .grid{ grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width:520px){ .grid{ grid-template-columns: 1fr; } }
+    .day{ background: linear-gradient(to bottom right, rgba(255,255,255,.02), rgba(0,0,0,.2)); border:1px solid rgba(148,163,184,.12); border-radius: var(--radius); box-shadow: var(--shadow); overflow:hidden; display:flex; flex-direction:column; min-height:260px; transition: transform .18s ease, box-shadow .18s ease; }
+    .day:hover{ transform: translateY(-2px); box-shadow: 0 14px 35px rgba(0,0,0,.45) }
+    .day-header{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 14px; border-bottom:1px solid rgba(148,163,184,.1); background: rgba(17,24,39,.6) }
+    .day-title{ font-weight:700; letter-spacing:.2px }
+    .day-progress{ width:46%; display:flex; align-items:center; gap:8px }
+    .bar{ position:relative; flex:1; height:10px; border-radius:999px; background:rgba(148,163,184,.18); overflow:hidden }
+    .fill{ position:absolute; inset:0; width:0%; background:linear-gradient(90deg, var(--acc2), #10b981); transition: width .35s ease }
+    .pct{ font-size:12px; color:#cbd5e1; min-width:36px; text-align:right }
+    .tasks{ padding:10px; display:flex; flex-direction:column; gap:10px; flex:1 }
+    .empty{ text-align:center; color:#94a3b8; font-size:13px; padding:16px }
+    .card{ background: var(--card); border:1px solid rgba(148,163,184,.15); border-radius: 14px; padding:12px; box-shadow: 0 6px 16px rgba(0,0,0,.35); transition: transform .18s ease, border-color .2s ease, background .2s ease, opacity .25s ease; position:relative; }
+    .card:hover{ transform: translateY(-2px) }
+    .card-head{ display:flex; align-items:center; gap:10px; justify-content:space-between }
+    .title{ font-weight:600; font-size:14px; letter-spacing:.2px; margin-right:auto; cursor:pointer }
+    .meta{ font-size:12px; color:#cbd5e1; display:flex; align-items:center; gap:8px }
+    .desc{ margin-top:6px; font-size:13px; color:#cbd5e1; white-space:pre-wrap }
+    .badge{ font-size:11px; padding:4px 8px; border-radius:999px; color:#061025; font-weight:600 }
+    .actions{ display:flex; align-items:center; gap:8px; margin-top:10px }
+    .checkbox{ appearance:none; width:18px; height:18px; border-radius:6px; border:1.5px solid rgba(148,163,184,.35); display:inline-grid; place-items:center; cursor:pointer; transition: background .2s ease, border .2s ease }
+    .checkbox:checked{ background: radial-gradient( circle at 30% 30%, #34d399, #10b981 ); border-color: rgba(16,185,129,.8) }
+    .checkbox::after{ content:"✓"; font-size:12px; color:white; transform: scale(0); transition: transform .15s ease; font-weight:700 }
+    .checkbox:checked::after{ transform: scale(1) }
+    .completed .title{ text-decoration: line-through; opacity:.7 }
+    .fab{ position:fixed; right:20px; bottom:22px; z-index:60; width:56px; height:56px; border-radius:50%; display:grid; place-items:center; background: radial-gradient(circle at 30% 30%, #a78bfa, #7c3aed); color:white; font-size:24px; box-shadow: 0 14px 30px rgba(124,58,237,.45); border: none; cursor:pointer; transition: transform .15s ease, filter .15s ease; outline:none; display:none; }
+    .fab.show{ display:grid; }
+    .overlay{ position:fixed; inset:0; background: rgba(2,6,23,.6); backdrop-filter: blur(4px); display:none; place-items:center; z-index:70 }
+    .overlay.show{ display:grid }
+    .modal{ width:min(720px, 96vw); background:linear-gradient(to bottom right, rgba(255,255,255,.05), rgba(0,0,0,.25)); border:1px solid rgba(148,163,184,.2); border-radius:20px; padding:16px; box-shadow: var(--shadow); transform: translateY(12px); opacity:0; transition: transform .2s ease, opacity .2s ease }
+    .overlay.show .modal{ transform:none; opacity:1 }
+    .modal h3{ margin:6px 6px 14px; letter-spacing:.2px }
+    .form{ display:grid; gap:10px; grid-template-columns: 1fr 1fr }
+    .form .full{ grid-column: 1 / -1 }
+    label{ font-size:12px; color:#94a3b8 }
+    input[type="text"], textarea, select{ width:100%; padding:10px 12px; border-radius:12px; background:#0b1226; border:1px solid rgba(148,163,184,.18); color:var(--text); outline:none }
+    textarea{ resize: vertical; min-height:70px }
+    .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:8px }
+
+    /* ===== AUTH GATE ===== */
+    .auth-gate{ position:fixed; inset:0; display:grid; place-items:center; text-align:center; padding:24px; background: radial-gradient(1200px 600px at 20% -10%, #1f2937, transparent), radial-gradient(1000px 500px at 110% 10%, #0b1020, transparent), var(--bg); z-index:100; }
+    .auth-card{ width:min(520px, 94vw); background: linear-gradient(to bottom right, rgba(255,255,255,.06), rgba(0,0,0,.25)); border:1px solid rgba(148,163,184,.18); border-radius:20px; padding:24px; box-shadow: var(--shadow); text-align:left; }
+    .auth-card h2{ margin:0 0 8px; letter-spacing:.3px }
+    .auth-actions{ display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:8px; flex-wrap:wrap; }
+    .error{ color:#fecaca; margin-top:6px; min-height:18px }
+    .small{ color:var(--muted) }
+    .hint{ margin-top:8px; font-size:12px; color:#9ca3af }
+    .lock{ font-size:32px; margin-bottom:8px; }
+
+/* === THEME: Elegante & Simétrico (solo login) === */
+
+/* Paleta más sobria (acentos sutiles) */
+:root{
+  --elev: 0 14px 32px rgba(0,0,0,.45);
+  --ring: 0 0 0 4px rgba(139,92,246,.14);
+  --line: rgba(148,163,184,.18);
+  --muted-2:#a9b4c9;
+}
+
+/* Fondo: menos ruido, más pulcro y simétrico */
+.auth-gate{
+  background:
+    radial-gradient(900px 480px at 50% -10%, rgba(31,41,55,.85), transparent 60%),
+    radial-gradient(600px 380px at 50% 110%, rgba(11,16,32,.9), transparent 65%),
+    var(--bg);
+}
+.auth-gate::before,
+.auth-gate::after{
+  opacity:.16; filter: blur(70px);
+  background:
+    radial-gradient(480px 360px at 25% 20%, rgba(139,92,246,.30), transparent 60%),
+    radial-gradient(420px 320px at 75% 80%, rgba(6,182,212,.26), transparent 62%);
+  animation: floatBlobs 22s ease-in-out infinite alternate;
+}
+.auth-gate::after{ display:none; } /* aún más limpio */
+
+/* Tarjeta: proporciones y simetría centrada */
+.auth-card{
+  max-width: 460px;
+  padding: 28px 26px 24px;
+  border-radius: 20px;
+  background: linear-gradient(to bottom right, rgba(255,255,255,.06), rgba(0,0,0,.18));
+  border: 1px solid var(--line);
+  box-shadow: var(--elev);
+}
+.auth-card::before{
+  opacity:.12; /* borde iridiscente más sutil */
+}
+
+/* Cabecera centrada: icono + título con separador */
+.lock{
+  display:block; text-align:center; font-size: 40px; margin: 2px 0 6px;
+  filter: drop-shadow(0 6px 18px rgba(124,58,237,.3));
+}
+.auth-card h2{
+  text-align:center;
+  margin-bottom: 14px;
+  background: linear-gradient(90deg, #e5e7eb, #c7d2fe);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.auth-card h2::after{
+  content:""; display:block; height:1px; margin: 14px auto 4px;
+  width: clamp(120px, 50%, 220px);
+  background: linear-gradient(90deg, transparent, var(--line), transparent);
+}
+
+/* Micro copy centrado y uniforme */
+.small{ color: var(--muted-2); text-align:center; }
+.hint{ color:#91a0bd; text-align:center; }
+
+/* Formulario: rejilla 1 columna (simetría vertical) */
+.auth-card .form{
+  display:grid; grid-template-columns: 1fr; gap: 12px;
+}
+.auth-card label{
+  color:#9fb0c8; letter-spacing:.2px;
+}
+
+/* Inputs: misma altura, misma estética */
+.auth-card input[type="email"],
+.auth-card input[type="password"]{
+  height: 44px;
+  border-radius: 12px;
+  background: #0a1222;
+  border:1px solid rgba(148,163,184,.20);
+  color: var(--text);
+  padding: 10px 12px;
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease, transform .06s ease;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.02);
+}
+.auth-card input[type="email"]:focus,
+.auth-card input[type="password"]:focus{
+  border-color: rgba(139,92,246,.55);
+  background: #0b1528;
+  box-shadow: var(--ring);
+}
+.auth-card input::placeholder{ color:#7e8dad; }
+
+/* Acciones: centradas, botón con ancho óptico consistente */
+.auth-actions{
+  justify-content: center;
+  gap: 12px;
+}
+#loginBtnGate.btn.btn-primary{
+  min-width: 240px;
+  height: 44px;
+  border-radius: 12px;
+  padding: 0 16px;
+  font-weight: 600;
+  letter-spacing:.2px;
+  background: linear-gradient(90deg, #8b5cf6, #5ac8fa);
+  box-shadow: 0 12px 26px rgba(124,58,237,.35);
+}
+#loginBtnGate.btn.btn-primary:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px rgba(124,58,237,.42);
+}
+#loginBtnGate.btn.btn-primary:active{
+  transform: translateY(0);
+  box-shadow: 0 10px 22px rgba(124,58,237,.30);
+}
+
+#authStatus{ color:#cbd5ff; text-align:center; }
+#authError{
+  color:#fecaca; background: rgba(239,68,68,.08);
+  border: 1px solid rgba(239,68,68,.22);
+  padding:8px 10px; border-radius: 10px; text-align:center;
+}
+
+/* Responsive: mantener simetría centrada en móviles */
+@media (max-width:520px){
+  .auth-card{ padding: 24px 18px; }
+  #loginBtnGate.btn.btn-primary{ min-width: 100%; }
+}
+
+/* Preferencia de accesibilidad */
+@media (prefers-reduced-motion: reduce){
+  .auth-gate::before{ animation:none; }
+}
+
+
+
+
+
+
+
+  </style>
+
+ 
+
+
+</head>
+<body>
+  <!-- ========== AUTH GATE (Login local) ========= -->
+  <div id="authGate" class="auth-gate">
+    <div class="auth-card">
+      <div class="lock">🔒</div>
+      <h2>Iniciar sesión</h2>
+      <p class="small">Acceso con correo y contraseña definidos en este HTML (no usa Firebase Authentication).</p>
+
+      <div class="form">
+        <div class="full">
+          <label for="email">Correo</label>
+          <input id="email" type="email" autocomplete="username" placeholder="tu@correo.com" required />
+        </div>
+        <div class="full">
+          <label for="password">Contraseña</label>
+          <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" required />
+        </div>
+      </div>
+
+      <div class="auth-actions">
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <button id="loginBtnGate" class="btn btn-primary">Entrar</button>
+        </div>
+        <div id="authStatus" class="small"></div>
+      </div>
+
+      <div id="authError" class="error"></div>
+      <div class="hint">Edita la lista <code>USERS</code> en este HTML para añadir o quitar usuarios.</div>
+    </div>
+  </div>
+
+  <!-- ========== APP ========= -->
+  <header id="topbar" class="topbar" role="banner">
+    <div class="topbar-inner">
+      <h1>Mi Semana</h1>
+      <div class="controls">
+        <div class="search" title="Buscar por nombre/etiqueta">
+          <input id="search" type="text" placeholder="Buscar tarea... (Ctrl + K)" />
+        </div>
+        <button class="btn" id="exportIcs">Exportar .ics</button>
+        <button class="btn" id="importIcs">Importar .ics</button>
+        <input id="icsFile" type="file" accept=".ics,text/calendar" style="display:none" />
+        <button class="btn" id="logoutBtn" title="Cerrar sesión" style="display:none;">Salir</button>
+        <div id="userChip" class="pill" style="display:none;"></div>
+      </div>
+    </div>
+  </header>
+
+  <main id="container">
+    <section id="days" class="grid" aria-live="polite" aria-label="Días de la semana"></section>
+  </main>
+
+  <button class="fab" id="addBtn" aria-label="Agregar tarea" title="Agregar tarea">➕</button>
+
+  <div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal" role="document">
+      <h3 id="modalTitle">Agregar tarea</h3>
+      <form id="taskForm" class="form">
+        <input id="editId" type="hidden" />
+        <div class="full">
+          <label for="title">Título</label>
+          <input id="title" type="text" maxlength="120" placeholder="Ej. Reunión con equipo" required />
+        </div>
+        <div class="full">
+          <label for="notes">Notas</label>
+          <textarea id="notes" maxlength="600" placeholder="Notas / detalles"></textarea>
+        </div>
+        <div>
+          <label for="day">Día</label>
+          <select id="day" required></select>
+        </div>
+        <div>
+          <label for="time12">Hora (12h)</label>
+          <div style="display:flex; gap:6px;">
+            <input id="timeH" type="text" inputmode="numeric" pattern="^(0?[1-9]|1[0-2])$" placeholder="hh" style="width:64px" required />
+            <span style="align-self:center">:</span>
+            <input id="timeM" type="text" inputmode="numeric" pattern="^[0-5][0-9]$" placeholder="mm" style="width:64px" required />
+            <select id="timeAP" style="width:90px">
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label for="color">Color etiqueta</label>
+          <input id="color" type="color" value="#8b5cf6" />
+        </div>
+        <div>
+          <label for="tag">Etiqueta</label>
+          <input id="tag" type="text" maxlength="24" placeholder="ej: trabajo" />
+        </div>
+        <div class="full">
+          <label><input id="done" type="checkbox" /> Marcar como hecha</label>
+        </div>
+        <div class="modal-actions full">
+          <button type="button" class="btn" id="cancelBtn">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="saveBtn">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <template id="taskTemplate">
+    <article class="card">
+      <div class="card-head">
+        <div class="meta">
+          <input type="checkbox" class="checkbox" />
+          <span class="time"></span>
+        </div>
+        <button class="btn btn-danger btn-delete" title="Eliminar">Eliminar</button>
+      </div>
+      <div class="title"></div>
+      <div class="desc"></div>
+      <div class="actions">
+        <span class="badge"></span>
+        <button class="btn btn-small btn-edit" title="Editar">Editar</button>
+      </div>
+    </article>
+  </template>
+
+  <script>
+  (function(){
+    /* ===================== LOGIN HTML (sin Firebase Auth) ===================== */
+    // ⚠️ Edita la lista de usuarios permitidos aquí
+    const USERS = [
+      { email: "demo@demo.com", password: "123456" },
+      { email: "josenatanaelramosrojo203@gmail.com", password: "123456" },
+      // { email: "otro@correo.com", password: "secreto" },
+    ];
+
+    const authGate   = document.getElementById('authGate');
+    const emailInput = document.getElementById('email');
+    const passInput  = document.getElementById('password');
+    const loginBtn   = document.getElementById('loginBtnGate');
+    const authError  = document.getElementById('authError');
+    const authStatus = document.getElementById('authStatus');
+
+    const topbar   = document.getElementById('topbar');
+    const container= document.getElementById('container');
+    const addBtn   = document.getElementById('addBtn');
+    const logoutBtn= document.getElementById('logoutBtn');
+    const userChip = document.getElementById('userChip');
+
+    let uid = null;      // hash(email)
+    let email = null;
+
+    function showAppUI(show){
+      authGate.style.display = show ? 'none' : 'grid';
+      topbar.classList.toggle('show', show);
+      container.classList.toggle('show', show);
+      addBtn.classList.toggle('show', show);
+      logoutBtn.style.display = show ? 'inline-flex' : 'none';
+      userChip.style.display  = show ? 'inline-flex' : 'none';
+    }
+
+    function setErr(msg){ authError.textContent = msg || ""; }
+    function setStatus(msg){ authStatus.textContent = msg || ""; }
+
+    loginBtn?.addEventListener('click', async () => {
+      setErr(""); setStatus("");
+      const e = (emailInput.value || "").trim().toLowerCase();
+      const p = (passInput.value || "");
+      if(!e || !p){ setErr("Completa correo y contraseña"); return; }
+      const ok = USERS.some(u => u.email.toLowerCase() === e && String(u.password) === p);
+      if(!ok){ setErr("Credenciales inválidas o no autorizadas."); return; }
+
+      email = e;
+      uid = await sha256Hex(e);
+      window.__uid = uid; // para módulos externos si existieran
+
+      userChip.textContent = email;
+      showAppUI(true);
+
+      // Cambiar storage key al del usuario y recargar tareas de ese espacio
+      setStorageKeyForUid(uid);
+      tasks = load();
+      render();
+      // Arrancar sync remoto (si está disponible)
+      initRemoteSync();
+    });
+
+    // Permitir Enter para enviar
+    [emailInput, passInput].forEach(el => el.addEventListener('keydown', ev => {
+      if(ev.key === 'Enter'){ loginBtn.click(); }
+    }));
+
+    logoutBtn?.addEventListener('click', () => {
+      // opcional: cancelar sync
+      if (unsubRemote) { unsubRemote(); unsubRemote = null; }
+      uid = null; email = null;
+      userChip.textContent = '';
+      setStorageKeyForUid(null);
+      showAppUI(false);
+    });
+
+    /* ===================== PLANNER ===================== */
+    const DAYS = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"];
+    let STORAGE_KEY = 'planner.anonymous'; // se sobre-escribe tras login
+    /** @type {{id:string,title:string,notes:string,day:number,time24:string,tag:string,color:string,done:boolean,created:number}[]} */
+    let tasks = [];
+
+    // UI planner
+    const daysGrid = document.getElementById('days');
+    const overlay  = document.getElementById('overlay');
+    const taskForm = document.getElementById('taskForm');
+    const cancelBtn= document.getElementById('cancelBtn');
+    const editId   = document.getElementById('editId');
+    const titleInp = document.getElementById('title');
+    const notesInp = document.getElementById('notes');
+    const daySel   = document.getElementById('day');
+    const timeH    = document.getElementById('timeH');
+    const timeM    = document.getElementById('timeM');
+    const timeAP   = document.getElementById('timeAP');
+    const colorInp = document.getElementById('color');
+    const tagInp   = document.getElementById('tag');
+    const doneInp  = document.getElementById('done');
+    const search   = document.getElementById('search');
+    const exportIcsBtn = document.getElementById('exportIcs');
+    const importIcsBtn = document.getElementById('importIcs');
+    const icsFile  = document.getElementById('icsFile');
+
+    // Sync opcional
+    const sync = window.__sync || null;
+    let unsubRemote = null;
+    let lastRemote = new Map();
+    let syncing = false;
+
+    // Inicial Planner (sin mostrar hasta login)
+    daySel.innerHTML = DAYS.map((d,i)=>`<option value="${i}">${d}</option>`).join('');
+    const jsDay = new Date().getDay();
+    daySel.value = String(jsDay===0?6:jsDay-1);
+    buildColumns();
+
+    // Listeners
+    addBtn.addEventListener('click', ()=> openModal());
+    cancelBtn.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e)=>{ if(e.target === overlay) closeModal(); });
+    document.addEventListener('keydown', (e)=>{
+      if(e.key === 'Escape' && overlay.classList.contains('show')) closeModal();
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); search.focus(); }
+    });
+    taskForm.addEventListener('submit', onSubmit);
+    search.addEventListener('input', ()=> render());
+    exportIcsBtn.addEventListener('click', exportICS);
+    importIcsBtn.addEventListener('click', ()=> icsFile.click());
+    icsFile.addEventListener('change', importICS);
+
+    /* ---------- Render ---------- */
+    function buildColumns(){
+      daysGrid.innerHTML = DAYS.map((day, i) => {
+        return `<div class="day" data-day="${i}" aria-label="${day}">
+          <div class="day-header">
+            <span class="day-title">${day}</span>
+            <div class="day-progress">
+              <div class="bar"><div class="fill" data-fill="${i}"></div></div>
+              <span class="pct" data-pct="${i}">0%</span>
+            </div>
+          </div>
+          <div class="tasks" data-list="${i}"></div>
+          <div class="empty" data-empty="${i}">Sin tareas. Agrega con “➕”.</div>
+        </div>`
+      }).join('');
+    }
+
+    function render(){
+      document.querySelectorAll('.tasks').forEach(list => list.innerHTML='');
+      const q = (search.value || '').trim().toLowerCase();
+
+      const byDay = Array.from({length:7}, ()=>[]);
+      tasks.slice().sort((a,b)=> (a.time24||'').localeCompare(b.time24||'') || (a.created - b.created))
+        .forEach(t=> byDay[t.day]?.push(t));
+
+      DAYS.forEach((_, dayIndex)=>{
+        const list = document.querySelector(`[data-list="${dayIndex}"]`);
+        const empty = document.querySelector(`[data-empty="${dayIndex}"]`);
+        const fill = document.querySelector(`[data-fill="${dayIndex}"]`);
+        const pct  = document.querySelector(`[data-pct="${dayIndex}"]`);
+
+        let dayTasks = byDay[dayIndex];
+        if(q) dayTasks = dayTasks.filter(t => t.title.toLowerCase().includes(q) || (t.tag||'').toLowerCase().includes(q));
+
+        if(dayTasks.length===0){ empty.style.display='block'; }
+        else { empty.style.display='none'; dayTasks.forEach(task => list.appendChild(renderTask(task))); }
+
+        const total = byDay[dayIndex].length;
+        const done = byDay[dayIndex].filter(t=>t.done).length;
+        const p = total ? Math.round(done*100/total) : 0;
+        fill.style.width = p + '%'; pct.textContent = p + '%';
+      });
+    }
+
+    function renderTask(task){
+      const tpl = document.getElementById('taskTemplate');
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      if(task.done) node.classList.add('completed');
+      node.dataset.id = task.id;
+
+      const ch  = node.querySelector('.checkbox');
+      const tm  = node.querySelector('.time');
+      const tt  = node.querySelector('.title');
+      const ds  = node.querySelector('.desc');
+      const bdg = node.querySelector('.badge');
+      const del = node.querySelector('.btn-delete');
+      const edt = node.querySelector('.btn-edit');
+
+      ch.checked = !!task.done;
+      tm.textContent = to12h(task.time24 || '');
+      tt.textContent = task.title;
+      ds.textContent = task.notes || '';
+      bdg.textContent = task.tag || '';
+      bdg.style.background = task.color || '#8b5cf6';
+      bdg.style.color = contrast(task.color || '#8b5cf6');
+
+      ch.addEventListener('change', ()=>{ task.done = ch.checked; save(); render(); });
+      del.addEventListener('click', ()=>{ tasks = tasks.filter(x=>x.id!==task.id); save(); render(); });
+      edt.addEventListener('click', ()=> openModal(task));
+      tt.addEventListener('click', ()=> openModal(task));
+
+      return node;
+    }
+
+    /* ---------- Modal ---------- */
+    function openModal(task){
+      overlay.classList.add('show');
+      if(task){
+        document.getElementById('modalTitle').textContent = 'Editar tarea';
+        editId.value = task.id;
+        titleInp.value = task.title;
+        notesInp.value = task.notes || '';
+        daySel.value   = String(task.day || 0);
+        const {H, M, AP} = to12hParts(task.time24 || '09:00');
+        timeH.value = H; timeM.value = M; timeAP.value = AP;
+        colorInp.value = task.color || '#8b5cf6';
+        tagInp.value   = task.tag || '';
+        doneInp.checked = !!task.done;
+      }else{
+        document.getElementById('modalTitle').textContent = 'Agregar tarea';
+        taskForm.reset();
+        editId.value='';
+        timeH.value = '9'; timeM.value = '00'; timeAP.value = 'AM';
+        colorInp.value = '#8b5cf6'; tagInp.value = '';
+        doneInp.checked = false;
+      }
+      setTimeout(()=> titleInp.focus(), 80);
+    }
+    function closeModal(){ overlay.classList.remove('show'); taskForm.reset(); editId.value=''; }
+
+    function onSubmit(e){
+      e.preventDefault();
+      const title = (titleInp.value||'').trim(); if(!title) return;
+      const notes = (notesInp.value||'').trim();
+      const day = parseInt(daySel.value,10);
+      const time24 = from12h(timeH.value, timeM.value, timeAP.value);
+      const color = colorInp.value || '#8b5cf6';
+      const tag = (tagInp.value||'').trim();
+      const done = !!doneInp.checked;
+      const id = editId.value;
+
+      if(id){
+        const t = tasks.find(x=>x.id===id);
+        if(t){ Object.assign(t, { title, notes, day, time24, color, tag, done }); }
+      }else{
+        tasks.push({ id: genId(), title, notes, day, time24, color, tag, done, created: Date.now() });
+      }
+      save(); render(); closeModal();
+    }
+
+    /* ---------- Storage & Sync ---------- */
+    function setStorageKeyForUid(u){
+      STORAGE_KEY = u ? `planner.${u}` : 'planner.anonymous';
+    }
+    setStorageKeyForUid(null); // antes de login
+
+    function genId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+    function load(){ try{ const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : []; }catch{ return [] } }
+    function save(){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+      pushRemote();
+    }
+
+    async function initRemoteSync(){
+      if(!sync || !sync.db || !uid) return;
+      const { db, collection, onSnapshot } = sync;
+      const colRef = collection(db, 'users', uid, 'tasks');
+      if (unsubRemote) { unsubRemote(); unsubRemote = null; }
+      unsubRemote = onSnapshot(colRef, (snap)=>{
+        const remote = new Map();
+        snap.forEach(d=> remote.set(d.id, d.data()));
+        lastRemote = remote;
+        // Merge remoto -> local (simple)
+        let changed = false;
+        const localById = new Map(tasks.map(t=>[t.id,t]));
+        for(const r of remote.values()){
+          const l = localById.get(r.id);
+          if (!l){ tasks.push(r); changed = true; }
+          else if (JSON.stringify(l) !== JSON.stringify(r)){ Object.assign(l, r); changed = true; }
+        }
+        if(changed){ save(); render(); }
+      });
+      // Primer push
+      await pushRemote();
+    }
+
+    async function pushRemote(){
+      if(!sync || !sync.db || !uid) return;
+      const { db, collection, doc, setDoc } = sync;
+      const colRef = collection(db, 'users', uid, 'tasks');
+      for(const t of tasks){
+        await setDoc(doc(colRef, t.id), t, { merge: true });
+      }
+    }
+
+    /* ---------- 12h helpers ---------- */
+    function pad2(n){ n = String(n); return n.length===1 ? '0'+n : n; }
+    function to12h(time24){
+      if(!time24) return '';
+      const [h,m] = time24.split(':').map(x=>parseInt(x,10));
+      const ap = h >= 12 ? 'PM' : 'AM';
+      let H = h % 12; if(H===0) H = 12;
+      return `${H}:${pad2(m)} ${ap}`;
+    }
+    function to12hParts(time24){
+      if(!time24) return {H:'9',M:'00',AP:'AM'};
+      const [h,m] = time24.split(':').map(x=>parseInt(x,10));
+      const AP = h >= 12 ? 'PM' : 'AM';
+      let H = h % 12; if(H===0) H = 12;
+      return {H:String(H), M:pad2(m), AP};
+    }
+    function from12h(H, M, AP){
+      let h = parseInt(H,10); let m = parseInt(M,10);
+      if(isNaN(h) || h<1 || h>12) h = 9;
+      if(isNaN(m) || m<0 || m>59) m = 0;
+      if((AP||'AM').toUpperCase()==='PM' && h!==12) h += 12;
+      if((AP||'AM').toUpperCase()==='AM' && h===12) h = 0;
+      return pad2(h)+':'+pad2(m);
+    }
+    function contrast(hex){ try{ hex = (hex||'#8b5cf6').replace('#',''); const r=parseInt(hex.substr(0,2),16); const g=parseInt(hex.substr(2,2),16); const b=parseInt(hex.substr(4,2),16); const yiq = ((r*299)+(g*587)+(b*114))/1000; return yiq>=128?'#061025':'#ffffff'; }catch(e){ return '#061025'; } }
+
+    /* ---------- ICS (calendario) ---------- */
+    function exportICS(){
+      const lines = ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Planner//ES','CALSCALE:GREGORIAN'];
+      const base = startOfWeek(new Date()); // lunes
+      for(const t of tasks){
+        const dt = dateForDayAndTime(base, t.day, t.time24);
+        const uidLine = `task-${t.id}@planner`;
+        lines.push('BEGIN:VEVENT');
+        lines.push('UID:'+uidLine);
+        lines.push('DTSTAMP:'+icsDate(new Date()));
+        lines.push('DTSTART:'+icsDate(dt));
+        lines.push('DTEND:'+icsDate(new Date(dt.getTime()+60*60*1000)));
+        lines.push('SUMMARY:'+escapeICS(t.title));
+        if(t.notes) lines.push('DESCRIPTION:'+escapeICS(t.notes));
+        lines.push('END:VEVENT');
+      }
+      lines.push('END:VCALENDAR');
+      download('planner-week.ics', lines.join('\\r\\n'), 'text/calendar');
+    }
+
+    async function importICS(ev){
+      const file = ev.target.files?.[0];
+      if(!file) return;
+      const txt = await file.text();
+      const events = parseICS(txt);
+      let added = 0;
+      for(const e of events){
+        if(!e.dtstart || !e.summary) continue;
+        const dt = e.dtstart;
+        const wd = dt.getDay(); // 0..6 dom..sáb
+        const day = wd===0?6:wd-1; // lunes=0
+        const time24 = pad2(dt.getHours())+':'+pad2(dt.getMinutes());
+        tasks.push({ id: genId(), title: e.summary, notes: e.description||'', day, time24, color:'#8b5cf6', tag:'', done:false, created: Date.now() });
+        added++;
+      }
+      save(); render();
+      alert(`Importadas ${added} tareas desde el calendario.`);
+      ev.target.value='';
+    }
+
+    function parseICS(text){
+      const evts = [];
+      const lines = text.split(/\\r?\\n/);
+      let cur = null;
+      for(let raw of lines){
+        const line = raw.trim();
+        if(line==='BEGIN:VEVENT'){ cur = {}; continue; }
+        if(line==='END:VEVENT'){ if(cur) evts.push(cur); cur=null; continue; }
+        if(!cur) continue;
+        if(line.startsWith('DTSTART')){
+          const v = line.split(':')[1]; cur.dtstart = icsParseDate(v);
+        } else if(line.startsWith('SUMMARY:')){
+          cur.summary = unescapeICS(line.slice(8));
+        } else if(line.startsWith('DESCRIPTION:')){
+          cur.description = unescapeICS(line.slice(12));
+        }
+      }
+      return evts;
+    }
+
+    function icsDate(d){
+      const yyyy = d.getFullYear();
+      const mm = pad2(d.getMonth()+1);
+      const dd = pad2(d.getDate());
+      const HH = pad2(d.getHours());
+      const MM = pad2(d.getMinutes());
+      const SS = pad2(d.getSeconds());
+      return `${yyyy}${mm}${dd}T${HH}${MM}${SS}`;
+    }
+    function icsParseDate(v){
+      const m = /^(\\d{4})(\\d{2})(\\d{2})(?:T(\\d{2})(\\d{2})(\\d{2})(Z)?)?$/.exec(v);
+      if(!m) return new Date();
+      const y=+m[1], mo=+m[2]-1, d=+m[3], hh=+(m[4]||'9'), mm=+(m[5]||'0'), ss=+(m[6]||'0');
+      if(m[7]==='Z'){ return new Date(Date.UTC(y,mo,d,hh,mm,ss)); }
+      return new Date(y,mo,d,hh,mm,ss);
+    }
+    function escapeICS(s){ return (s||'').replace(/\\n/g,'\\\\n').replace(/,/g,'\\,').replace(/;/g,'\\;'); }
+    function unescapeICS(s){ return (s||'').replace(/\\\\n/g,'\\n').replace(/\\,/g,',').replace(/\\;/g,';'); }
+
+    function startOfWeek(d){
+      const x = new Date(d); x.setHours(0,0,0,0);
+      const wd = x.getDay(); // 0 dom .. 6 sáb
+      const diff = (wd===0 ? -6 : 1 - wd); // a lunes
+      x.setDate(x.getDate() + diff);
+      return x;
+    }
+    function dateForDayAndTime(weekStart, dayIndex, time24){
+      const [hh,mm] = (time24||'09:00').split(':').map(n=>parseInt(n,10));
+      const d = new Date(weekStart);
+      d.setDate(d.getDate()+dayIndex);
+      d.setHours(hh||9, mm||0, 0, 0);
+      return d;
+    }
+    function download(name, content, type){
+      const blob = new Blob([content], {type}); const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+
+    /* ---------- Util general ---------- */
+    async function sha256Hex(text){
+      const enc = new TextEncoder().encode(String(text).trim().toLowerCase());
+      const hash = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    }
+    function contrast(hex){ try{ hex = (hex||'#8b5cf6').replace('#',''); const r=parseInt(hex.substr(0,2),16); const g=parseInt(hex.substr(2,2),16); const b=parseInt(hex.substr(4,2),16); const yiq = ((r*299)+(g*587)+(b*114))/1000; return yiq>=128?'#061025':'#ffffff'; }catch(e){ return '#061025'; } }
+
+    // Accesibilidad inputs de hora
+    [timeH,timeM].forEach(inp => {
+      inp.addEventListener('input', ()=>{ inp.value = inp.value.replace(/\\D/g,''); if(inp===timeH && inp.value.length>2) inp.value = inp.value.slice(0,2); if(inp===timeM && inp.value.length>2) inp.value = inp.value.slice(0,2); });
+      inp.addEventListener('blur', ()=>{
+        let v = parseInt(inp.value||'0',10);
+        if(inp===timeH){ if(isNaN(v)||v<1) v=1; if(v>12) v=12; }
+        else { if(isNaN(v)||v<0) v=0; if(v>59) v=59; }
+        inp.value = String(v);
+      });
+    });
+
+  })();
+  </script>
+  
+  <!-- === Firebase (solo Firestore) === -->
+<!-- === Firebase: SOLO Firestore (sin Auth) === -->
+<script type="module">
+  // SDK modular desde CDN
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
+  import {
+    getFirestore, collection, doc, setDoc, onSnapshot
+  } from "https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+
+  // Config de tu proyecto
+const firebaseConfig = {
+  apiKey: "AIzaSyDyLpzLjgsGqcqjbqtbryWJZaLibAIOdcs",
+  authDomain: "planificador-1e122.firebaseapp.com",
+  databaseURL: "https://planificador-1e122-default-rtdb.firebaseio.com",
+  projectId: "planificador-1e122",
+  storageBucket: "planificador-1e122.firebasestorage.app",
+  messagingSenderId: "761162798044",
+  appId: "1:761162798044:web:2b227e0f24d8961f497519"
+};
+  // Inicializar
+  const app = initializeApp(firebaseConfig);
+  const db  = getFirestore(app);
+
+  // Exponer lo que tu app espera (sin Auth)
+  window.__sync = {
+    db,
+    collection,
+    doc,
+    setDoc,
+    onSnapshot
+  };
+</script>
+
+
+
+</body>
+</html>
